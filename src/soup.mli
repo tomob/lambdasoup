@@ -132,6 +132,10 @@ val select : string -> (_ node) -> element nodes
     immediate children of [node], adjacent next siblings, and all next siblings,
     respectively.
 
+    XML namespace prefixes can be included in selectors, but the colon must be
+    escaped with [\\ ], for example: [dc:\\title]. Namespaces can be used in
+    tag names or attribute names.
+
     In addition, you can use the empty selector to select [node] itself. In this
     case, note that if [node] is not an element (for example, it is often the
     soup node), [select] will result in nothing: [select] always results in
@@ -551,6 +555,7 @@ val create_element :
   ?classes:string list ->
   ?attributes:(string * string) list ->
   ?inner_text:string ->
+  ?namespace:string ->
   string ->
     element node
 (** [create_element tag] creates a new element with the name [tag].
@@ -569,7 +574,9 @@ val create_element :
     [~attributes].
 
     If [~inner_text] is specified, a text node is created with the given string,
-    and made the single child of the new element. *)
+    and made the single child of the new element.
+
+    If [~namespace] is specified, the namespace information is added to the element.*)
 
 val create_text : string -> general node
 (** Creates a new text node with the given content. *)

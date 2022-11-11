@@ -47,8 +47,9 @@ type general = unit
 type soup = unit
 
 type element_values =
-  {mutable name       : string;
-   mutable attributes : (string * string) list;
+  {mutable namespace  : string;
+   mutable name       : string;
+   mutable attributes : ((string * string) * string) list;
    mutable children   : general node list}
 
 and document_values =
@@ -78,8 +79,26 @@ let forget_type : (_ node) -> (_ node) =
 
 let coerce node = forget_type node
 
-let create_element name attributes children =
-  let values = {name; attributes; children} in
+let rec prefix_of_namespace namespace node = match node.values with
+  | `Element {attributes; _} ->
+    check_attributes namespace node attributes
+  | `Text _ when Option.is_some node.parent ->
+    prefix_of_namespace namespace (Option.get node.parent)
+  | _ -> None
+and check_attributes namespace node attributes =
+  match find_namespace_attr namespace attributes with
+  | Some ((_, n), _) -> Some n
+  | None when Option.is_some node.parent
+    -> prefix_of_namespace namespace (Option.get node.parent)
+  | _ -> None
+and find_namespace_attr namespace =
+  List.find_opt (fun (n, v) ->
+    match n with
+    | "http://www.w3.org/2000/xmlns/", _ when v = namespace -> true
+    | _ -> false)
+
+let create_element (namespace, name) attributes children =
+  let values = {namespace; name; attributes; children} in
   let node = {self = None; parent = None; values = `Element values} in
   node.self <- Some node;
   children |> List.iter (fun child -> child.parent <- Some node);
@@ -113,9 +132,8 @@ let from_signals' ~map_attributes signals =
     ~element:(fun name attributes children ->
       let attributes =
         attributes
-        |> List.map (fun ((_, n), v) -> n, v)
         |> map_attributes name in
-      create_element (snd name) attributes children)
+      create_element name attributes children)
     s)
   |> Markup.to_list
   |> create_document !doctype
@@ -128,7 +146,8 @@ let parse text =
   let report _l e =
     match e with
     | `Misnested_tag ("body", _, attributes) ->
-      body_attributes := !body_attributes @ attributes
+      let attributes' = List.map (fun (n, v) -> ("", n), v) attributes in
+      body_attributes := !body_attributes @ attributes'
     | _ -> () in
   text
   |> Markup.string
@@ -186,9 +205,13 @@ let name = function
   | {values = `Element {name; _}; _} -> String.lowercase_ascii name
   | _ -> failwith "Soup.name: internal error: not an element" [@coverage off]
 
+let namespace = function
+  | {values = `Element {namespace; _}; _} -> String.lowercase_ascii namespace
+  | _ -> failwith "Soup.name: internal error: not an element" [@coverage off]
+
 let fold_attributes f init = function
   | {values = `Element {attributes; _}; _} ->
-    attributes |> List.fold_left (fun v (name, value) -> f v name value) init
+    attributes |> List.fold_left (fun v ((_ns, name), value) -> f v name value) init
   | _ ->
     failwith "Soup.fold_attributes: internal error: not an element"
       [@coverage off]
@@ -471,7 +494,7 @@ sig
   val matches_selector : t -> soup node -> soup node -> bool
 end =
 struct
-  type type_ = Name of string | Universal
+  type type_ = Name of string | NamespacedName of string * string | Universal
 
   type attribute =
     | Present of string
@@ -607,6 +630,11 @@ struct
   and matches_simple_selector node = function
     | Type Universal -> true
     | Type (Name name') -> name node = (String.lowercase_ascii name')
+    | Type (NamespacedName (ns, name')) ->
+      let ns_prefix = prefix_of_namespace (namespace node) node
+        |> Option.value ~default:""
+      in
+      name node = (String.lowercase_ascii name') && ns_prefix = (String.lowercase_ascii ns)
     | Attribute attribute_selector ->
       matches_attribute_selector node attribute_selector
     | Pseudo_class pseudo_class_selector ->
@@ -742,13 +770,19 @@ struct
     in
     loop ()
 
+  let maybe_namespaced name =
+    match String.split_on_char ':' name with
+    | [ns; name] -> NamespacedName (ns, name)
+    | [name] -> Name name
+    | _ -> parse_error "invalid identifier"
+
   let parse_type_selector stream =
     match Stream.peek stream with
     | Some '*' -> Stream.junk stream; Universal
     | _ ->
       try
         let name = parse_identifier stream in
-        Name name
+        maybe_namespaced name
       with _ -> parse_error "expected tag name or '*'"
 
   let parse_attribute_operator stream =
@@ -1007,11 +1041,9 @@ let signals root =
   let root = forget_type root in
 
   let rec traverse acc = function
-    | {values = `Element {name; attributes; children}; _} ->
+    | {values = `Element {namespace; name; attributes; children}; _} ->
       let start_signal =
-        `Start_element
-          (("http://www.w3.org/1999/xhtml", name),
-           List.map (fun (n, v) -> ("", n), v) attributes)
+        `Start_element ((namespace, name), attributes)
       in
       `End_element::(traverse_list (start_signal::acc) children)
 
@@ -1209,7 +1241,7 @@ let set_name new_name = function
 let delete_attribute name = function
   | {values = `Element e; _} ->
     e.attributes <-
-      e.attributes |> List.filter (fun (name', _) -> name' <> name)
+      e.attributes |> List.filter (fun ((_, name'), _) -> name' <> name)
   | _ ->
     failwith "Soup.delete_attribute: internal error: not an element"
       [@coverage off]
@@ -1218,8 +1250,8 @@ let set_attribute name value = function
   | {values = `Element e; _} ->
     e.attributes <-
       e.attributes
-      |> List.filter (fun (name', _) -> name' <> name)
-      |> fun attributes -> (name, value)::attributes
+      |> List.filter (fun ((_, name'), _) -> name' <> name)
+      |> fun attributes -> (("", name), value)::attributes
   | _ ->
     failwith "Soup.set_attribute: internal error: not an element"
       [@coverage off]
@@ -1239,14 +1271,14 @@ let remove_class class_ element =
     | [] -> delete_attribute "class" element
     | v -> set_classes v element
 
-let create_element ?id ?class_ ?classes ?(attributes = []) ?inner_text name =
+let create_element ?id ?class_ ?classes ?(attributes = []) ?inner_text ?(namespace = "") name =
   let children =
     match inner_text with
     | None -> []
     | Some s -> [create_text s]
   in
 
-  let element = create_element name [] children in
+  let element = create_element (namespace, name) [] children in
 
   attributes |> List.iter (fun (n, v) -> set_attribute n v element);
 

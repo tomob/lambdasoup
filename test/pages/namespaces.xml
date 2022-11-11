@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="BookId" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xmlns:opf="http://www.idpf.org/2007/opf"
+            xmlns:dcterms="http://purl.org/dc/terms/">
+    <dc:title>example title</dc:title>
+    <dc:identifier id="BookId" opf:scheme="URI">example-id</dc:identifier>
+    <dc:creator opf:file-as="blah" opf:role="aut">Example</dc:creator>
+    <dc:date>2022-10-20T21:27:12.000000+00:00</dc:date>
+    <title>Non-namespaced tag</title>
+    <test opf:scheme="OPF Scheme" dc:scheme="DC Scheme"/>
+  </metadata>
+</package>

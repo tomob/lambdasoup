@@ -20,6 +20,12 @@ let page : string -> string =
 
   fun page_name -> Hashtbl.find table (page_name ^ ".html")
 
+let parse_xml str =
+  Markup.string str
+  |> Markup.parse_xml
+  |> Markup.signals
+  |> from_signals
+
 let suites = [
   "lambdasoup" >::: [
     ("normal_return" >:: fun _ ->
@@ -1134,6 +1140,21 @@ let suites = [
 
       assert_bool "equal" (equal (parse document1) (parse document2));
       assert_bool "equal" (equal (parse document1) (parse document3)));
+
+    ("namespace-in-tags" >:: fun _ ->
+      let channel = open_in "pages/namespaces.xml" in
+      let contents = read_channel channel in
+      close_in channel;
+
+      let xml = parse_xml contents in
+
+      assert_equal ~msg:"selector without namespace finds all tags"
+                  (xml $$ "title" |> count) 2;
+      assert_equal ~msg:"selector with namespace finds one tag"
+                  (xml $$ "dc\\:title" |> count) 1;
+      assert_equal ~msg:"selector with namespace finds the right tag"
+                  (xml $ "dc\\:title" |> R.leaf_text) "example title";
+    );
   ]
 ]
 
